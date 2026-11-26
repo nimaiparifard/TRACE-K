@@ -2,6 +2,7 @@
 
 import hashlib
 import random
+from functools import lru_cache
 
 import torch
 from torch.nn.functional import cosine_similarity, normalize
@@ -45,6 +46,21 @@ def rewire(edges, seed):
     return randomized
 
 
+@lru_cache(maxsize=256)
+def canonical_edges(view_count, layers, inter_layer, cross_view):
+    nodes = torch.arange(view_count * len(layers)).view(view_count, len(layers))
+    edges = []
+    if inter_layer:
+        for position, (first, second) in enumerate(zip(layers, layers[1:])):
+            if second == first + 1:
+                for a, b in zip(nodes[:, position].tolist(), nodes[:, position + 1].tolist()):
+                    edges.extend([(a, b, 0, 1.), (b, a, 0, 1.)])
+    if cross_view:
+        for column in nodes.T.tolist():
+            edges.extend((a, b, 1, 1.) for a in column for b in column if a != b)
+    return tuple(edges), torch.tensor(edges, dtype=torch.float32).reshape(-1, 4)
+
+
 def graph(item, target, options, training=False, excluded_layer=None):
     row, cache = item
     states = cache["states"].float()
@@ -73,16 +89,12 @@ def graph(item, target, options, training=False, excluded_layer=None):
                              previous, cache["entropy"]], dim=-1)
         x = torch.cat([x, stats[selected][:, layers]], dim=-1)
     x = x.flatten(0, 1)
-    nodes = torch.arange(len(x)).view(len(selected), len(layers))
-    edges = []
-    if options.get("inter_layer", True):
-        for position, (first, second) in enumerate(zip(layers, layers[1:])):
-            if second == first + 1:
-                for a, b in zip(nodes[:, position].tolist(), nodes[:, position + 1].tolist()):
-                    edges.extend([(a, b, 0, 1.), (b, a, 0, 1.)])
-    if options.get("cross_view", True):
-        for column in nodes.T.tolist():
-            edges.extend((a, b, 1, 1.) for a in column for b in column if a != b)
+    edges, edge = canonical_edges(len(selected), tuple(layers), options.get("inter_layer", True),
+                                  options.get("cross_view", True))
+    anchor = (selected.index(target) + 1) * len(layers) - 1
+    if not (options.get("similarity") or options.get("random_edges")):
+        return x, edge, anchor
+    edges = list(edges)
     if options.get("similarity", False) and len(x) > 1:
         unit = normalize(states[selected][:, layers].flatten(0, 1))
         similarities = unit @ unit.T
@@ -95,7 +107,7 @@ def graph(item, target, options, training=False, excluded_layer=None):
         digest = hashlib.sha256(f"{options.get('seed', 0)}:{row['fact_id']}:{target}".encode()).digest()
         edges = rewire(edges, int.from_bytes(digest[:8], "little"))
     edge = torch.tensor(edges, dtype=torch.float32).reshape(-1, 4)
-    return x, edge, nodes[selected.index(target), -1].item()
+    return x, edge, anchor
 
 
 def collate(graphs, device):

@@ -71,7 +71,7 @@ class Probe(nn.Module):
             self.project = nn.Sequential(nn.Linear(size, projection_width), nn.GELU(),
                                          nn.Linear(projection_width, width))
             self.layers = nn.ModuleList(MessagePassing(width, self.kind) for _ in range(3))
-        if self.kind in {"mlp", "deepsets"}:
+        if self.kind in {"mlp", "pooled_mlp", "deepsets"}:
             inner = width
             if options.get("match_rgcn"):
                 projection_width = options.get("projection_width", 256)
@@ -90,10 +90,13 @@ class Probe(nn.Module):
             nn.init.zeros_(self.output.bias)
 
     def forward(self, batch, final=None):
+        return F.linear(self.vocabulary_input(batch, final), self.unembedding, self.bias)
+
+    def vocabulary_input(self, batch, final=None, return_pool=False, shared_graph=False):
         x, edges, weights, groups, anchors = batch
         if self.kind == "tuned":
             residual = x[anchors]
-            return self.lens(residual + self.translator(residual))
+            return self.normalize(residual + self.translator(residual))
         if hasattr(self, "components"):
             x = F.linear(x - self.mean, self.components)
         x = self.project(x)
@@ -104,10 +107,16 @@ class Probe(nn.Module):
             pooled = x[anchors]
         elif self.kind == "mlp":
             pooled = self.mlp(x[anchors])
-        elif self.kind == "deepsets":
-            x = self.mlp(x)
+        elif self.kind in {"deepsets", "pooled_mlp"}:
+            if self.kind == "deepsets":
+                x = self.mlp(x)
             sums = x.new_zeros(len(anchors), x.size(1)).index_add_(0, groups, x)
             pooled = sums / torch.bincount(groups, minlength=len(anchors))[:, None]
+            if self.kind == "pooled_mlp":
+                pooled = self.mlp(pooled + x[anchors])
+        elif shared_graph:
+            scores = self.query(x[anchors]) @ x.T / x.size(-1) ** .5
+            pooled = scores.softmax(-1) @ x
         else:
             if self.kind == "transformer":
                 x = torch.cat([self.attention(nodes[None], nodes[None], nodes[None],
@@ -128,7 +137,7 @@ class Probe(nn.Module):
             cap = self.residual_limit * base.norm(dim=-1, keepdim=True)
             scale = (cap / prediction.norm(dim=-1, keepdim=True).clamp_min(1e-8)).clamp(max=1)
             prediction = base + prediction * scale
-        return F.linear(prediction, self.unembedding, self.bias)
+        return (prediction, pooled) if return_pool else prediction
 
     def lens(self, residual):
         return F.linear(self.normalize(residual), self.unembedding, self.bias)

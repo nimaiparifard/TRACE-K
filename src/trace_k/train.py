@@ -1,5 +1,6 @@
 """Probe training, checkpoint selection, and held-out evaluation."""
 
+import hashlib
 import json
 import random
 from collections import defaultdict
@@ -26,6 +27,8 @@ def batches(dataset, size, shuffle=False):
 def samples(items, options, device, training=False, excluded_layer=None):
     examples = [(item, target) for item in items
                 for target in range(len(item[0]["paraphrases"]))]
+    if options["model"] in {"linear", "mlp", "pooled_mlp", "deepsets", "transformer", "tuned"}:
+        options = options | dict(inter_layer=False, cross_view=False, similarity=False, random_edges=False)
     return examples, collate([graph(item, target, options, training, excluded_layer)
                              for item, target in examples], device)
 
@@ -54,7 +57,8 @@ def summarize(rows):
                 pairwise_accuracy=average([score for row in rows for score in row["pairwise"]]),
                 recovery_rate=average(failed), failed_prompts=len(failed),
                 expressed_regression_rate=average([not hit for hit in expressed]),
-                ece=sum(abs(sum(hit - prob for hit, prob in group)) for group in bins) / len(rows),
+                ece=(sum(abs(sum(hit - prob for hit, prob in group)) for group in bins)
+                     / len(rows) if rows else None),
                 consistency=average([len(set(group)) == 1 for group in multi_view]),
                 multi_view_facts=len(multi_view),
                 exposure_auroc=(roc_auc_score([row["exposed"] for row in rows],
@@ -104,6 +108,8 @@ def paired_accuracy(rows, reference_tokens, rng):
         totals = per_fact[row["fact_id"]]
         totals[0] += int(row["prediction"] == row["gold"]) - int(reference == row["gold"])
         totals[1] += 1
+    if not per_fact:
+        return dict(prompts=0, facts=0, accuracy_delta=None, accuracy_delta_ci95=None)
     changes, counts = np.array(list(per_fact.values())).T
     interval = None
     if len(counts) > 1:
@@ -136,7 +142,8 @@ def paired_results(rows, training_tokens, seed):
     """Compare on identical prompts and resample entire facts for the interval."""
     groups = {"all": rows,
               "seen_answer": [row for row in rows if row["gold"] in training_tokens],
-              "unseen_answer": [row for row in rows if row["gold"] not in training_tokens]}
+              "unseen_answer": [row for row in rows if row["gold"] not in training_tokens],
+              "all_paraphrases_wrong": [row for row in rows if row.get("all_paraphrases_wrong")]}
     result = {}
     rng = np.random.default_rng(seed)
     for label, group in groups.items():
@@ -157,29 +164,34 @@ def evaluate(model, dataset, options, device, batch_size, excluded_layer=None):
         examples, batch = samples(items, options, device, excluded_layer=excluded_layer)
         final = final_states(examples, device) if model.residual_limit else None
         logits = model(batch, final).cpu()
-        for ((fact, _), target), scores in zip(examples, logits):
-            gold = fact["gold"]
-            prediction = scores.argmax().item()
-            probability = scores.softmax(-1)
-            base = fact["base"][target]
-            if base == gold:
-                evidence = "Expressed Knowledge"
-            elif gold in fact["base"] + fact["heldout"]:
-                evidence = "Accessible but Inconsistent"
-            elif prediction == gold:
-                evidence = "Internally Decodable"
-            else:
-                evidence = "No Evidence Found"
-            tied_before = (scores[:gold] == scores[gold]).sum().item()
-            rows.append(dict(fact_id=fact["fact_id"], target=target,
-                             prompt=fact["paraphrases"][target], answer=fact["object"],
-                             base=base, base_text=fact["base_text"][target], gold=gold,
-                             prediction=prediction, confidence=probability[prediction].item(),
-                             gold_probability=probability[gold].item(), evidence=evidence,
-                             exposed=fact.get("exposed"), lens_correct=fact["lens_correct"][target],
-                             rank=1 + (scores > scores[gold]).sum().item() + tied_before,
-                             pairwise=(scores[gold] > scores[fact["negatives"]]).tolist()))
+        rows.extend(prediction_rows(examples, logits))
     return summarize(rows), rows
+
+
+def prediction_rows(examples, logits):
+    for ((fact, _), target), scores in zip(examples, logits, strict=True):
+        gold = fact["gold"]
+        prediction = scores.argmax().item()
+        probability = scores.softmax(-1)
+        base = fact["base"][target]
+        if base == gold:
+            evidence = "Expressed Knowledge"
+        elif gold in fact["base"] + fact["heldout"]:
+            evidence = "Accessible but Inconsistent"
+        elif prediction == gold:
+            evidence = "Internally Decodable"
+        else:
+            evidence = "No Evidence Found"
+        tied_before = (scores[:gold] == scores[gold]).sum().item()
+        yield dict(fact_id=fact["fact_id"], target=target,
+                         prompt=fact["paraphrases"][target], answer=fact["object"],
+                         base=base, base_text=fact["base_text"][target], gold=gold,
+                         prediction=prediction, confidence=probability[prediction].item(),
+                         gold_probability=probability[gold].item(), evidence=evidence,
+                         exposed=fact.get("exposed"), lens_correct=fact["lens_correct"][target],
+                         all_paraphrases_wrong=gold not in fact["base"] + fact["heldout"],
+                         rank=1 + (scores > scores[gold]).sum().item() + tied_before,
+                         pairwise=(scores[gold] > scores[fact["negatives"]]).tolist())
 
 
 def train(cache, out, options, device, epochs, batch_size, learning_rate):
@@ -187,6 +199,8 @@ def train(cache, out, options, device, epochs, batch_size, learning_rate):
     random.seed(options["seed"])
     cache, out = Path(cache), Path(out)
     source = json.loads((cache / "source.json").read_text(encoding="utf-8"))
+    fit_manifests = {split: hashlib.sha256((cache / f"{split}.jsonl").read_bytes()).hexdigest()
+                     for split in ("train", "val")}
     train_set, val_set, test_set = [Activations(cache, name) for name in ("train", "val", "test")]
     if options["model"] == "tuned":
         depth = train_set[0][1]["states"].size(1)
@@ -239,7 +253,8 @@ def train(cache, out, options, device, epochs, batch_size, learning_rate):
         if metrics["mrr"] > best:
             best = metrics["mrr"]
             torch.save(dict(state=model.state_dict(), options=options, pca=pca,
-                            size=feature_size), out / "probe.pt")
+                            size=feature_size, source=source, fit_manifests=fit_manifests),
+                       out / "probe.pt")
     model.load_state_dict(torch.load(out / "probe.pt", weights_only=True)["state"])
     metrics, predictions = evaluate(model, test_set, options, device, batch_size)
     from transformers import AutoTokenizer

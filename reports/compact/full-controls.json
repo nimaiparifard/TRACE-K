@@ -1,0 +1,161 @@
+{
+  "residual_rgcn": {
+    "options": {
+      "model": "rgcn",
+      "mode": "multi",
+      "width": 128,
+      "seed": 42,
+      "view_dropout": 0.15,
+      "residual_limit": 0.15
+    },
+    "parameters": 1035904,
+    "test": {
+      "accuracy": 0.5426485655737705,
+      "hits_at_1": 0.5426485655737705,
+      "hits_at_5": 0.7359118852459017,
+      "mrr": 0.632284046839236,
+      "pairwise_accuracy": 0.9334338996957369,
+      "recovery_rate": 0.4624962040692378,
+      "failed_prompts": 6586,
+      "expressed_regression_rate": 0.02536824877250409,
+      "ece": 0.033511667974976934,
+      "consistency": 0.39344262295081966,
+      "multi_view_facts": 976,
+      "exposure_auroc": null,
+      "count": 7808
+    },
+    "history": [
+      {
+        "epoch": 1,
+        "train_loss": 2.4982197260694865,
+        "validation": {
+          "accuracy": 0.5376659856996936,
+          "hits_at_1": 0.5376659856996936,
+          "hits_at_5": 0.7122063329928499,
+          "mrr": 0.6190655445029937,
+          "pairwise_accuracy": 0.9196735687770323,
+          "recovery_rate": 0.4611686946071804,
+          "failed_prompts": 6657,
+          "expressed_regression_rate": 0.02893617021276596,
+          "ece": 0.03876864168099941,
+          "consistency": 0.38100102145045966,
+          "multi_view_facts": 979,
+          "exposure_auroc": null,
+          "count": 7832
+        }
+      }
+    ]
+  },
+  "residual_deepsets": {
+    "options": {
+      "model": "deepsets",
+      "mode": "multi",
+      "width": 128,
+      "seed": 42,
+      "view_dropout": 0.15,
+      "residual_limit": 0.15
+    },
+    "parameters": 559488,
+    "test": {
+      "accuracy": 0.5317622950819673,
+      "hits_at_1": 0.5317622950819673,
+      "hits_at_5": 0.7316854508196722,
+      "mrr": 0.6220812825640596,
+      "pairwise_accuracy": 0.9338826023041947,
+      "recovery_rate": 0.4485271788642575,
+      "failed_prompts": 6586,
+      "expressed_regression_rate": 0.019639934533551555,
+      "ece": 0.034865388133349356,
+      "consistency": 0.3739754098360656,
+      "multi_view_facts": 976,
+      "exposure_auroc": null,
+      "count": 7808
+    },
+    "history": [
+      {
+        "epoch": 1,
+        "train_loss": 2.7545560723087883,
+        "validation": {
+          "accuracy": 0.5343462717058223,
+          "hits_at_1": 0.5343462717058223,
+          "hits_at_5": 0.7042900919305414,
+          "mrr": 0.6129056492724748,
+          "pairwise_accuracy": 0.9196267411368049,
+          "recovery_rate": 0.455460417605528,
+          "failed_prompts": 6657,
+          "expressed_regression_rate": 0.01872340425531915,
+          "ece": 0.037325618646499546,
+          "consistency": 0.36670071501532175,
+          "multi_view_facts": 979,
+          "exposure_auroc": null,
+          "count": 7832
+        }
+      }
+    ],
+    "vs_residual_rgcn": {
+      "prompts": 7808,
+      "facts": 976,
+      "accuracy_delta": -0.010886270491803279,
+      "accuracy_delta_ci95": [
+        -0.019342341188524587,
+        -0.002689549180327869
+      ]
+    }
+  },
+  "residual_transformer": {
+    "options": {
+      "model": "transformer",
+      "mode": "multi",
+      "width": 128,
+      "seed": 42,
+      "view_dropout": 0.15,
+      "residual_limit": 0.15
+    },
+    "parameters": 609024,
+    "test": {
+      "accuracy": 0.5470030737704918,
+      "hits_at_1": 0.5470030737704918,
+      "hits_at_5": 0.7357838114754098,
+      "mrr": 0.6333508265100487,
+      "pairwise_accuracy": 0.9352372568459199,
+      "recovery_rate": 0.46614029760097175,
+      "failed_prompts": 6586,
+      "expressed_regression_rate": 0.01718494271685761,
+      "ece": 0.03413908916991204,
+      "consistency": 0.3760245901639344,
+      "multi_view_facts": 976,
+      "exposure_auroc": null,
+      "count": 7808
+    },
+    "history": [
+      {
+        "epoch": 1,
+        "train_loss": 2.575223496065121,
+        "validation": {
+          "accuracy": 0.5453268641470889,
+          "hits_at_1": 0.5453268641470889,
+          "hits_at_5": 0.7096527068437181,
+          "mrr": 0.622347094403838,
+          "pairwise_accuracy": 0.9205079521847223,
+          "recovery_rate": 0.46852936758299535,
+          "failed_prompts": 6657,
+          "expressed_regression_rate": 0.01957446808510638,
+          "ece": 0.03852295073912697,
+          "consistency": 0.37793667007150156,
+          "multi_view_facts": 979,
+          "exposure_auroc": null,
+          "count": 7832
+        }
+      }
+    ],
+    "vs_residual_rgcn": {
+      "prompts": 7808,
+      "facts": 976,
+      "accuracy_delta": 0.004354508196721311,
+      "accuracy_delta_ci95": [
+        -0.0015368852459016393,
+        0.010377177254098343
+      ]
+    }
+  }
+}
