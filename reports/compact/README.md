@@ -15,6 +15,48 @@ The prepared ParaRel pool contains 6,803 facts. Deduplication and prompt ambigui
 
 The controls share the training protocol and use different parameter counts. The Transformer comparison leaves the relative accuracy unresolved at this sample size and training budget. [Full probe control metrics](full-controls.json)
 
+### Compression and prediction preservation
+
+| Method | 96 nodes | 64 nodes | 32 nodes | 16 nodes |
+|---|---:|---:|---:|---:|
+| Random nodes | 54.29% | 54.34% | 53.82% | 53.06% |
+| Layer importance | 54.26% | 54.26% | 54.23% | 53.91% |
+| Paraphrase selection | 54.28% | 54.15% | 53.69% | 50.88% |
+| Spectral | 54.25% | 54.25% | 53.64% | 53.64% |
+| Activation similarity | 54.26% | 54.26% | 54.25% | 54.03% |
+| Signal-aware | 54.26% | 54.20% | 54.25% | 53.51% |
+| Prediction-aware | 54.26% | 54.20% | 54.24% | 54.23% |
+
+Prediction-aware Top-1 agreement is 100.00%, 99.88%, 99.41%, and 98.91% as the budget drops from 96 to 16 nodes. At 16 nodes its paired gold accuracy change is −0.04 percentage points (95% CI −0.20 to +0.12), and mean prediction KL is 0.00072. The correction-based margin bound certifies preservation on 37.94% of those targets, with zero observed violations across all 28 settings. The looser pooled bound certifies 0.42% at 16 nodes.
+
+At 32 nodes, Signal-aware reaches 96.66% agreement versus 92.89% for Spectral and has lower relative reconstruction error (0.131 versus 0.144). At 16 nodes the agreement rates are 92.35% and 92.82%, respectively. Spectral gives almost zero energy error on the eight evaluated modes across all budgets. Layer importance offers 100% agreement at 64 nodes and 99.58% at 32 nodes without a teacher forward for each new graph after calibration. [Full metrics, validation scores, and confidence intervals](full.json)
+
+![Full benchmark gold accuracy, Top-1 agreement, signal reconstruction, and spectral energy error](full-curves.png)
+
+### Graph ablations
+
+| Fixed R-GCN intervention | Gold accuracy | Difference from full (95% CI, percentage points) |
+|---|---:|---:|
+| Without cross-view edges | 54.19% | −0.08 [−0.45, +0.28] |
+| Without inter-layer edges | 54.25% | −0.01 [−0.23, +0.22] |
+| Degree-preserving rewiring | 54.02% | −0.24 [−0.67, +0.22] |
+| Last layer only | 40.24% | −14.02 [−15.82, −12.23] |
+| Middle layers only | 54.43% | +0.17 [−0.03, +0.38] |
+
+The edge interventions have paired intervals spanning zero. The strongest single-layer removal effect is layer index 6, with −0.20 percentage points (95% CI −0.35 to −0.09). These interventions use the same checkpoint on all 7,808 held-out prompts. The separate three-epoch benchmark below also retrains models under modified topologies. [All 21 ablations](full.json)
+
+### Downstream graph costs
+
+| Configuration | Payload with final states | Mean probe inference per fact | Peak extra GPU allocation during forward | One-time compression per fact |
+|---|---:|---:|---:|---:|
+| Full R-GCN, 128 nodes | 1,073.8 KiB | 6.17 ms | 4.11 MiB | — |
+| Layer importance, 64 nodes | 552.6 KiB | 6.15 ms | 3.98 MiB | 1.06 ms |
+| Prediction-aware, 16 nodes | 161.4 KiB | 6.05 ms | 3.98 MiB | 16.94 ms |
+
+The 16-node Prediction-aware graph reduces the graph-plus-final-state payload by 85.0%. The full and compact probe peak allocations both round to 1.01 GiB with resident tensors included. Probe latency changes little because every method still projects eight outputs through the same full vocabulary head. Prediction-aware construction runs the full teacher and differentiates its margin, so these storage savings apply after graph construction. [Timing and memory measurements](full.json)
+
+![Per-fact tensor payload, probe GPU latency, and offline construction time](full-systems.png)
+
 ### Frozen-decoder extraction
 
 The RTX 5070 processed 58,716 prompts, including the behavior-only views. Representation collection took 426.49 s and total extraction took 531.37 s, with 2.50 GiB peak CUDA allocation. The full activation cache occupies 4.38 GiB on disk, including the shared head and extraction diagnostics. Other GPU jobs were active during part of extraction. Every method uses this same upstream workload.
