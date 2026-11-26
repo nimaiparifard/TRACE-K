@@ -115,13 +115,13 @@ m_i^{(k)}=W_0^{(k)}u_i^{(k)}+b_0^{(k)}
 +\sum_r\sum_{j\in\mathcal N_r(i)}
 \frac{w_{ji}}{\sum_{q\in\mathcal N_r(i)}w_{qi}}W_r^{(k)}u_j^{(k)},
 \qquad
-u_i^{(k+1)}=u_i^{(k)}+\operatorname{GELU}(\operatorname{LayerNorm}(m_i^{(k)})).
+u_i^{(k+1)}=u_i^{(k)}+\mathrm{GELU}(\mathrm{LayerNorm}(m_i^{(k)})).
 $$
 
 An empty incoming relation contributes zero. After the last block, the anchor conditions a softmax over the nodes of its own graph:
 
 $$
-\alpha_i=\operatorname{softmax}_{i\in V_f}
+\alpha_i=\mathrm{softmax}_{i\in V_f}
 \left(\frac{(Q u_a)^\top u_i}{\sqrt{128}}\right),
 \qquad c_f=\sum_{i\in V_f}\alpha_i u_i.
 $$
@@ -141,7 +141,7 @@ $$
 
 The cap constrains the size of the correction in hidden space. Residual Linear uses only the target's last-layer state in its learned branch. This provides a control for the contribution of the residual path and a paired comparison for the added graph. The frozen vocabulary head and RMS norm receive no optimizer updates.
 
-Every graph view serves as a target during training. AdamW minimizes full-vocabulary cross-entropy, $\mathcal L=-\log\operatorname{softmax}(z)_{y_f}$, with learning rate $10^{-3}$ in the listed runs. The Tuned Lens control instead learns a zero-initialized residual affine translator at the middle block and minimizes $\operatorname{KL}(p_{\mathrm{final}}\|p_{\mathrm{translated}})$ against the frozen final distribution with the same norm and vocabulary head. Checkpoint selection uses validation MRR. The test set provides the final reported metrics. [Probe implementation](src/trace_k/probe.py) · [Training and evaluation](src/trace_k/train.py)
+Every graph view serves as a target during training. AdamW minimizes full-vocabulary cross-entropy, $\mathcal L=-\log\mathrm{softmax}(z)_{y_f}$, with learning rate $10^{-3}$ in the listed runs. The Tuned Lens control instead learns a zero-initialized residual affine translator at the middle block and minimizes $\mathrm{KL}(p_{\mathrm{final}}\|p_{\mathrm{translated}})$ against the frozen final distribution with the same norm and vocabulary head. Checkpoint selection uses validation MRR. The test set provides the final reported metrics. [Probe implementation](src/trace_k/probe.py) · [Training and evaluation](src/trace_k/train.py)
 
 ### Evaluation and uncertainty
 
@@ -149,11 +149,11 @@ For target prompt $i$ with gold token $y_i$, let $\widehat y_i$ be the probe arg
 
 $$
 \begin{aligned}
-\operatorname{Accuracy}&=\frac1n\sum_i\mathbf1[\widehat y_i=y_i],\\
-\operatorname{Hits@}k&=\frac1n\sum_i\mathbf1[R_i\le k],\qquad
-\operatorname{MRR}=\frac1n\sum_i R_i^{-1},\\
-\operatorname{Recovery}&=\frac{\sum_i\mathbf1[b_i\ne y_i,\,\widehat y_i=y_i]}{\sum_i\mathbf1[b_i\ne y_i]},\\
-\operatorname{Regression}&=\frac{\sum_i\mathbf1[b_i=y_i,\,\widehat y_i\ne y_i]}{\sum_i\mathbf1[b_i=y_i]}.
+\mathrm{Accuracy}&=\frac1n\sum_i\mathbf1[\widehat y_i=y_i],\\
+\text{Hits@}k&=\frac1n\sum_i\mathbf1[R_i\le k],\qquad
+\mathrm{MRR}=\frac1n\sum_i R_i^{-1},\\
+\mathrm{Recovery}&=\frac{\sum_i\mathbf1[b_i\ne y_i,\,\widehat y_i=y_i]}{\sum_i\mathbf1[b_i\ne y_i]},\\
+\mathrm{Regression}&=\frac{\sum_i\mathbf1[b_i=y_i,\,\widehat y_i\ne y_i]}{\sum_i\mathbf1[b_i=y_i]}.
 \end{aligned}
 $$
 
