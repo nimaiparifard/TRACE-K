@@ -208,14 +208,14 @@ def configuration_name(method, reduction, mix):
 
 
 @torch.no_grad()
-def evaluate_ablations(model, dataset, options, device, reference, seed):
+def evaluate_ablations(model, dataset, options, device, reference, seed, edge_only=False):
     depth = dataset[0][1]["states"].shape[1]
     variants = {"no_cross_view": {"cross_view": False},
                 "no_inter_layer": {"inter_layer": False},
-                "degree_preserving_rewire": {"random_edges": True},
-                "last_layer_only": {"layers": "last"},
-                "middle_layers_only": {"layers": "middle"}}
-    variants.update({f"leave_out_layer_{layer}": layer for layer in range(depth)})
+                "degree_preserving_rewire": {"random_edges": True}}
+    if not edge_only:
+        variants.update(last_layer_only={"layers": "last"}, middle_layers_only={"layers": "middle"})
+        variants.update({f"leave_out_layer_{layer}": layer for layer in range(depth)})
     results = {name: [] for name in variants}
     for index, item in enumerate(dataset, start=1):
         row, saved = item

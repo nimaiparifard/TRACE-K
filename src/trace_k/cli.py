@@ -179,7 +179,7 @@ def main():
         if options["mode"] not in {"single", "multi"}:
             raise ValueError("Probe mode must be single or multi.")
         if options["model"] not in {"rgcn", "gcn", "sage", "gat", "linear", "mlp",
-                                   "deepsets", "transformer", "tuned"}:
+                                   "deepsets", "pooled_mlp", "transformer", "tuned"}:
             raise ValueError("Unknown probe model.")
         if not 0 <= options["view_dropout"] < 1 or options["width"] < 1:
             raise ValueError("Set a positive probe width and a view dropout in [0, 1).")
@@ -191,6 +191,9 @@ def main():
             variants.update({"tuned_lens": {"model": "tuned"},
                              "residual_rgcn": {"model": "rgcn", "residual_limit": .15},
                              "residual_deepsets": {"model": "deepsets", "residual_limit": .15},
+                             "residual_mlp": {"model": "pooled_mlp", "match_rgcn": True,
+                                              "residual_limit": .15},
+                             "residual_single": {"model": "rgcn", "mode": "single", "residual_limit": .15},
                              "residual_transformer": {"model": "transformer", "residual_limit": .15},
                              "residual_no_cross_view": {"model": "rgcn", "residual_limit": .15, "cross_view": False},
                              "residual_no_inter_layer": {"model": "rgcn", "residual_limit": .15, "inter_layer": False},

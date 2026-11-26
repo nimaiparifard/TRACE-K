@@ -48,7 +48,12 @@ def attribution(model, inputs, position, layer, gold, foil, steps):
     return logits, activation, activation * gradient
 
 
-def interventions(model, tokenizer, facts, layer, neurons, gains, steps, seed):
+def interventions(model, tokenizer, facts, layer, neurons, gains, steps, seed,
+                  sign_aware=False, controls_enabled=True):
+    if any(not math.isfinite(gain) or gain < 0 for gain in gains):
+        raise ValueError("Gains must be finite and nonnegative.")
+    if sign_aware and any(not 1 <= gain <= 2 for gain in gains):
+        raise ValueError("Sign-aware gains must be between 1 and 2.")
     rng = random.Random(seed)
     depth = len(model.model.layers)
     if depth < 2 or not 0 <= layer < depth:
@@ -66,6 +71,7 @@ def interventions(model, tokenizer, facts, layer, neurons, gains, steps, seed):
             _, activation, scores = attribution(model, inputs, position, layer, gold, foil, steps)
             count = min(neurons, len(activation) // 2)
             selected = scores.abs().topk(count).indices.tolist()
+            directions = scores[selected].sign().tolist()
             available = sorted(set(range(len(activation))) - set(selected))
             random_indices = rng.sample(available, count)
             magnitude = activation.abs().cpu().tolist()
@@ -86,6 +92,10 @@ def interventions(model, tokenizer, facts, layer, neurons, gains, steps, seed):
             cases = [controls]
             if unrelated:
                 cases.append([("unrelated_fact", layer, selected)])
+            if not controls_enabled:
+                cases = [controls[:1]]
+            elif sign_aware:
+                controls.append(("unsigned", layer, selected))
             for case in cases:
                 is_unrelated = case[0][0] == "unrelated_fact"
                 current_inputs, current_position, current_gold = inputs, position, gold
@@ -105,11 +115,12 @@ def interventions(model, tokenizer, facts, layer, neurons, gains, steps, seed):
                 before_top = current_logits.argmax().item() if is_unrelated else base
                 for name, chosen_layer, indices in case:
                     for gain in gains:
-                        if not math.isfinite(gain) or gain < 0:
-                            raise ValueError("Gains must be finite and nonnegative.")
-
                         def scale(values):
-                            values[:, indices] *= gain
+                            if sign_aware and name != "unsigned":
+                                signs = values.new_tensor(directions[:len(indices)])
+                                values[:, indices] *= 1 + (gain - 1) * signs
+                            else:
+                                values[:, indices] *= gain
                             return values
 
                         modified, _, _ = activation_margin(
@@ -118,7 +129,9 @@ def interventions(model, tokenizer, facts, layer, neurons, gains, steps, seed):
                         after = (modified[current_gold] - modified[current_foil]).item()
                         yield dict(fact_id=current_id, target=current_target, source_fact_id=fact["fact_id"],
                                    control=name, layer=chosen_layer, neurons=indices,
-                                   gain=gain, gold=current_gold, foil=current_foil,
+                                   gain=gain, directions=(directions[:len(indices)]
+                                                         if sign_aware and name != "unsigned" else None),
+                                   gold=current_gold, foil=current_foil,
                                    before=before_top, after=modified.argmax().item(),
                                    before_margin=before, after_margin=after, delta_margin=after - before)
 

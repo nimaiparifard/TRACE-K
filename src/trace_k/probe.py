@@ -71,7 +71,7 @@ class Probe(nn.Module):
             self.project = nn.Sequential(nn.Linear(size, projection_width), nn.GELU(),
                                          nn.Linear(projection_width, width))
             self.layers = nn.ModuleList(MessagePassing(width, self.kind) for _ in range(3))
-        if self.kind in {"mlp", "deepsets"}:
+        if self.kind in {"mlp", "pooled_mlp", "deepsets"}:
             inner = width
             if options.get("match_rgcn"):
                 projection_width = options.get("projection_width", 256)
@@ -107,10 +107,13 @@ class Probe(nn.Module):
             pooled = x[anchors]
         elif self.kind == "mlp":
             pooled = self.mlp(x[anchors])
-        elif self.kind == "deepsets":
-            x = self.mlp(x)
+        elif self.kind in {"deepsets", "pooled_mlp"}:
+            if self.kind == "deepsets":
+                x = self.mlp(x)
             sums = x.new_zeros(len(anchors), x.size(1)).index_add_(0, groups, x)
             pooled = sums / torch.bincount(groups, minlength=len(anchors))[:, None]
+            if self.kind == "pooled_mlp":
+                pooled = self.mlp(pooled + x[anchors])
         elif shared_graph:
             scores = self.query(x[anchors]) @ x.T / x.size(-1) ** .5
             pooled = scores.softmax(-1) @ x

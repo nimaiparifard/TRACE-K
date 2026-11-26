@@ -74,6 +74,16 @@ def test_pipeline(tmp_path, run, model_path):
     metrics = json.loads((runs / "rgcn" / "metrics.json").read_text())
     assert metrics["test"]["count"] > 0
     assert metrics["paired_test"]["all"]["prompts"] == metrics["test"]["count"]
+    test_facts = read_jsonl(cache / "test.jsonl")
+    all_wrong = [row for row in test_facts if row["gold"] not in row["base"] + row["heldout"]]
+    subset = metrics["paired_test"]["all_paraphrases_wrong"]
+    if all_wrong:
+        assert subset["facts"] == len(all_wrong)
+        assert subset["prompts"] == sum(len(row["paraphrases"]) for row in all_wrong)
+        assert subset["frozen_accuracy"] == 0
+    else:
+        assert subset is None
+    assert (runs / "residual_mlp" / "metrics.json").is_file()
     comparison = tmp_path / "comparison.json"
     run("compare", runs / "rgcn", comparison, runs / "residual_rgcn")
     paired = json.loads(comparison.read_text())["comparisons"][str(runs / "residual_rgcn")]
