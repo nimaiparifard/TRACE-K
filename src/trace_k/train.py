@@ -1,5 +1,6 @@
 """Probe training, checkpoint selection, and held-out evaluation."""
 
+import hashlib
 import json
 import random
 from collections import defaultdict
@@ -26,6 +27,8 @@ def batches(dataset, size, shuffle=False):
 def samples(items, options, device, training=False, excluded_layer=None):
     examples = [(item, target) for item in items
                 for target in range(len(item[0]["paraphrases"]))]
+    if options["model"] in {"linear", "mlp", "deepsets", "transformer", "tuned"}:
+        options = options | dict(inter_layer=False, cross_view=False, similarity=False, random_edges=False)
     return examples, collate([graph(item, target, options, training, excluded_layer)
                              for item, target in examples], device)
 
@@ -187,6 +190,8 @@ def train(cache, out, options, device, epochs, batch_size, learning_rate):
     random.seed(options["seed"])
     cache, out = Path(cache), Path(out)
     source = json.loads((cache / "source.json").read_text(encoding="utf-8"))
+    fit_manifests = {split: hashlib.sha256((cache / f"{split}.jsonl").read_bytes()).hexdigest()
+                     for split in ("train", "val")}
     train_set, val_set, test_set = [Activations(cache, name) for name in ("train", "val", "test")]
     if options["model"] == "tuned":
         depth = train_set[0][1]["states"].size(1)
@@ -239,7 +244,8 @@ def train(cache, out, options, device, epochs, batch_size, learning_rate):
         if metrics["mrr"] > best:
             best = metrics["mrr"]
             torch.save(dict(state=model.state_dict(), options=options, pca=pca,
-                            size=feature_size), out / "probe.pt")
+                            size=feature_size, source=source, fit_manifests=fit_manifests),
+                       out / "probe.pt")
     model.load_state_dict(torch.load(out / "probe.pt", weights_only=True)["state"])
     metrics, predictions = evaluate(model, test_set, options, device, batch_size)
     from transformers import AutoTokenizer

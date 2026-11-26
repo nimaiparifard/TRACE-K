@@ -50,6 +50,10 @@ All probes use the same cached prompts and the same test targets. The two residu
 
 Each training report gives separate metrics for answers whose gold token was present or absent from the probe's training set. Accuracy changes are paired on the same prompts. The 95% intervals use 2,000 bootstrap draws that resample facts together with all their paraphrases. These intervals quantify held-out fact sampling variation within a run. For a stricter check on novel answers, use `trace-k split --mode object` with the same pool of facts, extract the resulting partitions, and run both residual probes on that cache.
 
+### TRACE-K Compact
+
+**Signal-Aware Summarization of LLM Activation Graphs** asks how many activation nodes can be removed while retaining factual next-token accuracy and the predictions of a fixed residual R-GCN. The benchmark compares seven compression methods at 96, 64, 32, and 16 nodes out of 128. [Results and figures](reports/compact/README.md) · [Protocol and prediction bound](reports/compact/protocol.md)
+
 ### Import another factual dataset
 
 Pass a UTF-8 JSONL file directly to `trace-k split`. Each row needs a unique fact identifier, subject, relation, expected object, and a list of paraphrases ending immediately before the answer. Provide matching template strings for template-disjoint experiments. Negative candidates and the behavior-only views are optional. Match each behavior prompt to a behavior template if running a template-disjoint experiment.

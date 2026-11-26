@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import math
 import random
 from pathlib import Path
 
@@ -50,6 +51,17 @@ def parser():
     comparison.add_argument("reference", type=Path)
     comparison.add_argument("out", type=Path)
     comparison.add_argument("candidates", nargs="+", type=Path)
+    compact = commands.add_parser("compact", help="Evaluate validation-selected graph compression.")
+    compact.add_argument("cache", type=Path)
+    compact.add_argument("checkpoint", type=Path)
+    compact.add_argument("out", type=Path)
+    compact.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    compact.add_argument("--seed", type=int, default=42)
+    compact.add_argument("--calibration-facts", type=positive, default=32)
+    compact.add_argument("--ablations", action="store_true",
+                         help="Evaluate relation, rewiring and layer interventions on all test facts.")
+    compact.add_argument("--weights", type=float, nargs=3, default=(1., 1., 1.),
+                         metavar=("SIGNAL", "SPECTRAL", "PREDICTION"))
     for command in (training, suite):
         command.add_argument("cache", type=Path)
         command.add_argument("out", type=Path)
@@ -141,11 +153,11 @@ def main():
         if args.random_weights and args.adapter:
             raise ValueError("Random-weight and adapted checkpoints are separate controls.")
         model, tokenizer = load_model(*model_options(args), args.random_weights, args.adapter)
-        extract(model, tokenizer, splits, args.out, args.batch_size)
+        extraction = extract(model, tokenizer, splits, args.out, args.batch_size)
         metadata = dict(model_id=args.model_id, revision=args.revision,
                         resolved_revision=getattr(model.config, "_commit_hash", None),
                         dtype=model_options(args)[2], random_weights=args.random_weights,
-                        adapter=args.adapter, seed=args.seed, split=partition)
+                        adapter=args.adapter, seed=args.seed, split=partition, extraction=extraction)
         (args.out / "source.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     elif command == "behavior":
         from .train import behavior_report, intermediate_lens_report
@@ -178,6 +190,13 @@ def main():
                         ("linear", "mlp", "deepsets", "transformer", "gcn", "sage", "gat", "rgcn")}
             variants.update({"tuned_lens": {"model": "tuned"},
                              "residual_rgcn": {"model": "rgcn", "residual_limit": .15},
+                             "residual_deepsets": {"model": "deepsets", "residual_limit": .15},
+                             "residual_transformer": {"model": "transformer", "residual_limit": .15},
+                             "residual_no_cross_view": {"model": "rgcn", "residual_limit": .15, "cross_view": False},
+                             "residual_no_inter_layer": {"model": "rgcn", "residual_limit": .15, "inter_layer": False},
+                             "residual_random_graph": {"model": "rgcn", "residual_limit": .15, "random_edges": True},
+                             "residual_last_layer": {"model": "rgcn", "residual_limit": .15, "layers": "last"},
+                             "residual_middle_layers": {"model": "rgcn", "residual_limit": .15, "layers": "middle"},
                              "residual_linear": {"model": "linear", "mode": "single",
                                                  "layers": "last", "residual_limit": .15},
                              "matched_mlp": {"model": "mlp", "match_rgcn": True},
@@ -201,6 +220,13 @@ def main():
             cache = args.random_cache if name == "random_llm" else args.cache
             train(cache, args.out / name, options | overrides,
                   args.device, args.epochs, args.batch_size, args.learning_rate)
+    elif command == "compact":
+        from .compact import run
+
+        if any(not math.isfinite(weight) or weight < 0 for weight in args.weights) or not any(args.weights):
+            raise ValueError("Compact objective weights must be finite, nonnegative and include a positive weight.")
+        run(args.cache, args.checkpoint, args.out, args.device, args.seed,
+            args.calibration_facts, args.weights, args.ablations)
     elif command == "compare":
         from .train import compare_runs
 

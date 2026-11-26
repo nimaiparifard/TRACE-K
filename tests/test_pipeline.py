@@ -12,8 +12,9 @@ from tokenizers.pre_tokenizers import Whitespace
 from transformers import LlamaConfig, LlamaForCausalLM, PreTrainedTokenizerFast
 
 from trace_k.cli import main
+from trace_k.compact import full_graph, prepare_batch
 from trace_k.data import partitions, read_jsonl, synthetic
-from trace_k.graph import Activations, graph
+from trace_k.graph import Activations, collate, graph
 from trace_k.probe import Probe
 
 
@@ -50,6 +51,9 @@ def test_pipeline(tmp_path, run, model_path):
     run("synthetic", facts, "--count", 12)
     run("split", facts, splits)
     run("extract", splits, cache, "--model-id", model_path, "--device", "cpu")
+    extraction = json.loads((cache / "source.json").read_text())["extraction"]
+    assert extraction["prompts"] > 0
+    assert extraction["cuda_peak_allocated_bytes"] is None
     row, saved = Activations(cache, "train")[0]
     expected = torch.tensor([item["gold_probability"] for item in row["behavior"]])
     torch.testing.assert_close(saved["lens_gold_probability"][:, -1], expected)
@@ -74,6 +78,27 @@ def test_pipeline(tmp_path, run, model_path):
     run("compare", runs / "rgcn", comparison, runs / "residual_rgcn")
     paired = json.loads(comparison.read_text())["comparisons"][str(runs / "residual_rgcn")]
     assert paired["prompts"] == metrics["test"]["count"]
+    checkpoint = torch.load(runs / "residual_rgcn" / "probe.pt", weights_only=True)
+    model = Probe(checkpoint["size"], torch.load(cache / "head.pt", weights_only=True),
+                  checkpoint["options"]).eval()
+    model.load_state_dict(checkpoint["state"])
+    item = Activations(cache, "test")[0]
+    final = item[1]["states"][:, -1].float()
+    repeated = collate([graph(item, target, checkpoint["options"]) for target in range(len(final))], "cpu")
+    shared = prepare_batch(full_graph(item, checkpoint["options"]), "cpu")
+    torch.testing.assert_close(model.vocabulary_input(repeated, final),
+                               model.vocabulary_input(shared, final, shared_graph=True))
+    compact_path = tmp_path / "compact.json"
+    run("compact", cache, runs / "residual_rgcn" / "probe.pt", compact_path,
+        "--device", "cpu", "--calibration-facts", 1, "--ablations")
+    compact = json.loads(compact_path.read_text())
+    assert len(compact["selected"]) == 28
+    assert "leave_out_layer_2" in compact["ablations"]
+    assert compact["test"]["full"]["accuracy"] == json.loads(
+        (runs / "residual_rgcn" / "metrics.json").read_text())["test"]["accuracy"]
+    for name in compact["selected"]:
+        assert compact["test"][name]["nodes"] < compact["test"]["full"]["nodes"]
+        assert compact["test"][name]["observed_certificate_violations"] == 0
     assert all(isinstance(row["prediction_text"], str)
                for row in read_jsonl(runs / "rgcn" / "predictions.jsonl"))
 

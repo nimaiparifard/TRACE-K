@@ -1,6 +1,7 @@
 """Frozen decoder activations and next-token measurements."""
 
 from pathlib import Path
+from time import perf_counter
 
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
@@ -100,6 +101,13 @@ def representations(model, tokenizer, prompts, batch_size, gold, negatives):
 
 
 def extract(model, tokenizer, split, directory, batch_size):
+    started = perf_counter()
+    device = next(model.parameters()).device
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+        torch.cuda.reset_peak_memory_stats(device)
+    forward_seconds = 0.
+    prompt_count = 0
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=False)
     tokenizer.save_pretrained(directory / "tokenizer")
@@ -120,8 +128,13 @@ def extract(model, tokenizer, split, directory, batch_size):
             negatives = {continuation_id(tokenizer, prompts, candidate)
                          for candidate in fact.get("negative_candidates", [])}
             negatives.difference_update({None, gold})
+            forward_started = perf_counter()
             states, embeddings, tops, lens_tops, entropy, gold_curves, base_curves, behavior = (
                 representations(model, tokenizer, prompts + heldout, batch_size, gold, sorted(negatives)))
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+            forward_seconds += perf_counter() - forward_started
+            prompt_count += len(prompts) + len(heldout)
             index = len(manifest)
             filename = f"{name}-{index:06d}.pt"
             torch.save(dict(states=states[:len(prompts)], embeddings=embeddings[:len(prompts)],
@@ -140,3 +153,7 @@ def extract(model, tokenizer, split, directory, batch_size):
             raise ValueError(f"No single-token answers survived in {name}.")
         write_jsonl(directory / f"{name}.jsonl", manifest)
         print(f"{name}: cached {len(manifest)}/{len(facts)} facts", flush=True)
+    return dict(device=str(device), prompts=prompt_count, representation_seconds=forward_seconds,
+                wall_seconds=perf_counter() - started,
+                cuda_peak_allocated_bytes=(torch.cuda.max_memory_allocated(device)
+                                           if device.type == "cuda" else None))
