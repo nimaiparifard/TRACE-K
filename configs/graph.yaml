@@ -1,0 +1,9 @@
+model: rgcn
+mode: multi
+width: 128
+projection_width: 256
+view_dropout: 0.15
+features: residual
+layers: all
+inter_layer: true
+cross_view: true

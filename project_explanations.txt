@@ -1,0 +1,956 @@
+به نظر من، **ترکیب Graph Neural Networks با Mechanistic Interpretability می‌تواند پروژه بسیار مناسبی برای رزومه تو باشد**؛ چون دو حوزه‌ای را به هم متصل می‌کند که در هر دو تجربه پژوهشی داری.
+
+اما نباید صرفاً برای استفاده از GNN، یک گراف مصنوعی بسازیم. گراف باید بتواند روابطی را مدل کند که روش‌های معمول مانند Linear Probing و MLP به‌سادگی مدل نمی‌کنند.
+
+پیشنهاد من یک پروژه مستقل با معماری زیر است.
+
+# **۱. معرفی پروژه پیشنهادی**
+
+# **TRACE-K**
+
+### **Tracing and Recovering Accessible Concealed Knowledge in Large Language Models**
+
+Paraphrase-Aware Graph Neural Probing and Causal Validation of Factual Knowledge in LLMs
+
+حوزه اصلی
+
+**Mechanistic Interpretability**
+
+معماری پیشنهادی
+
+**Relational GNN**
+
+مدل زبانی
+
+**Frozen LLM**
+
+نوع تحلیل
+
+**Representational + Causal**
+
+هدف پروژه پاسخ دادن به سه سؤال است:
+
+- آیا پاسخ صحیح در بازنمایی‌های داخلی مدل قابل استخراج است، حتی وقتی مدل پاسخ اشتباه می‌دهد؟
+- آیا روابط میان لایه‌های مدل و بازنمایی paraphraseهای مختلف، شواهد بهتری از دانش پنهان فراهم می‌کنند؟
+- آیا می‌توان با مداخله کنترل‌شده در فعالیت‌های داخلی مدل، به بازیابی دانش کمک کرد؟
+
+تفاوت اساسی این پروژه با یک Hallucination Detector معمولی این است که فقط درست یا غلط بودن پاسخ را پیش‌بینی نمی‌کند، بلکه تلاش می‌کند منشأ خطا را بررسی کند.
+
+## **۲. معماری کلی پیشنهادی**
+
+معماری مفهومی پیشنهادی TRACE-K؛ گراف در این معماری یک مدل تحلیلی از بازنمایی‌های LLM است، نه لزوماً مدار علّی واقعی آن.
+
+مدل زبانی اصلی را در تمام آزمایش‌های اصلی ثابت نگه می‌داریم. فقط GNN و probe آموزش می‌بینند. سپس برای اعتبارسنجی، به خود مدل زبانی برمی‌گردیم و اثر مداخلات را اندازه‌گیری می‌کنیم.
+
+# **۳. چگونه مسئله را به یک گراف تبدیل کنیم؟**
+
+سه روش مختلف برای وارد کردن GNN به این مسئله وجود دارد.
+
+| روش ساخت گراف               | گره‌ها                                 | پیچیدگی | پیشنهاد من  |
+| --------------------------- | -------------------------------------- | ------- | ----------- |
+| Layer Graph                 | لایه‌های LLM                           | کم      | Baseline    |
+| Multi-view Activation Graph | لایه‌های LLM در paraphraseهای مختلف    | متوسط   | روش اصلی    |
+| Neural Circuit Graph        | نورون‌ها، attention headها و featureها | زیاد    | توسعه آینده |
+
+پیشنهاد می‌کنم ابتدا روی **Multi-view Activation Graph** تمرکز کنی. این روش از تجربه قبلی تو در یادگیری گراف و multi-view representation نیز استفاده می‌کند.
+
+## **۳.۱. تعریف گره‌های گراف**
+
+فرض کنیم برای هر حقیقت ۸ paraphrase داریم و از Llama-3.2-1B استفاده می‌کنیم که ۱۶ لایه Transformer و hidden size برابر ۲۰۴۸ دارد.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://huggingface.co\&sz=32)
+
+NousResearch/Llama-3.2-1B at main
+
+
+
+هر گره نشان‌دهنده بازنمایی یک paraphrase در یک لایه مشخص است.
+
+\\[ v\_{p,l}=\text{Representation of prompt }p \text{ at layer }l \\]
+
+بنابراین:
+
+\\[ |V|=P\times L=8\times16=128 \\]
+
+برای هر سؤال یک گراف مستقل با ۱۲۸ گره خواهیم داشت.
+
+### **ساختار Multi-view Activation Graph**
+
+Inter-layer
+
+Cross-paraphrase
+
+لایه‌های مهم احتمالی
+
+## **۳.۲. تعریف یال‌های گراف**
+
+سه نوع ارتباط می‌توانیم داشته باشیم.
+
+**Inter-layer Edges:** ارتباط یک لایه با لایه بعدی برای همان paraphrase.
+
+\\[ (v\_{p,l},v\_{p,l+1}) \\]
+
+این ارتباط مسیر تغییر بازنمایی‌ها در طول عمق مدل را نشان می‌دهد.
+
+**Cross-paraphrase Edges:** ارتباط بازنمایی‌های paraphraseهای مختلف در یک لایه یکسان.
+
+\\[ (v\_{p,l},v\_{q,l}),\quad p\neq q \\]
+
+این ارتباط کمک می‌کند الگوهای مشترک مستقل از نحوه بیان سؤال را بررسی کنیم. در نسخه اولیه، تمام paraphraseها در یک لایه به یکدیگر متصل می‌شوند.
+
+**Similarity Edges:** ارتباط میان بازنمایی‌هایی که در فضای embedding شباهت بالایی دارند.
+
+\\[ w\_{ij}=\frac{h_i^\top h_j} {\\|h_i\\|\\|h_j\\|} \\]
+
+این نوع یال را در نسخه دوم اضافه می‌کنیم و تأثیر آن را با ablation study می‌سنجیم.
+
+توجه کن که شباهت بین دو بازنمایی به معنای رابطه علّی بین آن‌ها نیست. این یال‌ها فقط ساختار تحلیلی پیشنهادی ما هستند.
+
+# **۴. استخراج ویژگی‌های گره‌ها**
+
+برای هر paraphrase یک Forward Pass روی LLM انجام می‌دهیم.
+
+در نسخه اولیه، hidden state آخرین توکن ورودی، درست قبل از تولید پاسخ، را از تمام لایه‌ها ذخیره می‌کنیم.
+
+\\[ h\_{p,l}\in\mathbb{R}^{2048} \\]
+
+ویژگی اولیه هر گره می‌تواند شامل موارد زیر باشد:
+
+| ویژگی                               | ابعاد پیشنهادی |
+| ----------------------------------- | -------------- |
+| Residual stream representation      | 2048           |
+| Normalized layer position           | 1              |
+| Activation norm                     | 1              |
+| Activation sparsity                 | 1              |
+| Cosine similarity to previous layer | 1              |
+| Prediction entropy از Logit Lens    | 1              |
+
+در نتیجه هر گره در این پیکربندی ۲۰۵۳ ویژگی خواهد داشت.
+
+پیشنهاد می‌کنم برای شروع از hidden representation به‌تنهایی استفاده کنی و ویژگی‌های آماری را بعداً اضافه کنی تا تأثیر هر گروه از ویژگی‌ها قابل اندازه‌گیری باشد.
+
+## **۴.۱. کاهش ابعاد**
+
+\\[ z\_{p,l}=W\_{\text{proj}}h\_{p,l}+b \\]
+
+\\[ 2048\rightarrow256\rightarrow128 \\]
+
+دو روش را مقایسه کن:
+
+- PCA بدون آموزش نظارت‌شده، که فقط روی داده‌های train برازش شده است.
+- Learnable Linear Projection، که همراه GNN آموزش می‌بیند.
+
+## **۴.۲. استخراج Activationها با PyTorch**
+
+کد اولیه برای استخراج hidden states بسیار ساده است:
+
+```
+import torchfrom transformers import AutoTokenizer, AutoModelForCausalLMmodel_name = "meta-llama/Llama-3.2-1B"tokenizer = AutoTokenizer.from_pretrained(model_name)model = AutoModelForCausalLM.from_pretrained(    model_name,    torch_dtype=torch.bfloat16).to("cuda")model.eval()model.requires_grad_(False)@torch.inference_mode()def extract_representations(prompt):    inputs = tokenizer(        prompt,        return_tensors="pt"    ).to("cuda")    outputs = model(        **inputs,        output_hidden_states=True,        use_cache=False    )    hidden_states = torch.stack([        h[0, -1, :]        for h in outputs.hidden_states[1:]    ])    logits = outputs.logits[0, -1, :]
+```
+
+این کد برای یک prompt بدون padding نوشته شده است. در پیاده‌سازی batch باید موقعیت آخرین توکن معتبر را با attention mask مشخص کنی. همچنین برای causal intervention و attribution باید مسیر جداگانه‌ای بدون `inference_mode` داشته باشی.
+
+# **۵. معماری Graph Neural Network**
+
+پیشنهاد من این است که چهار معماری زیر را مقایسه کنی:
+
+| معماری    | نقش در پروژه             |
+| --------- | ------------------------ |
+| GCN       | Graph baseline           |
+| GraphSAGE | Graph baseline           |
+| GATv2     | Attention-based baseline |
+| R-GCN     | معماری پیشنهادی اولیه    |
+
+چون گراف ما انواع مختلف یال دارد، Relational GCN انتخاب منطقی است.
+
+## **۵.۱. پیکربندی پیشنهادی**
+
+**Input graph**
+
+128 nodes × 2048 features
+
+**Input projection**
+
+2048 → 256
+
+**R-GCN Layer 1**
+
+256 → 128 + LayerNorm + GELU
+
+**R-GCN Layer 2**
+
+128 → 128 + Residual connection
+
+**R-GCN Layer 3**
+
+128 → 128 + Residual connection
+
+**Query-conditioned Pooling**
+
+128-dimensional graph representation
+
+**Answer Ranking Head**
+
+128 → LLM hidden size → Vocabulary
+
+معادله message passing:
+
+\\[ h_i^{(k+1)}= \sigma\left( W_0^{(k)}h_i^{(k)} + \sum\_{r\in R} \sum\_{j\in\mathcal N_r(i)} \frac{W_r^{(k)}h_j^{(k)}}{c\_{i,r}} \right) \\]
+
+به این ترتیب مدل برای ارتباط‌های بین لایه‌ها و ارتباط‌های میان paraphraseها وزن‌های متفاوتی یاد می‌گیرد.
+
+## **۵.۲. چرا از Global Mean Pooling استفاده نکنیم؟**
+
+چون هدف ما صرفاً تشخیص دانش در مجموعه paraphraseها نیست. می‌خواهیم یک اجرای خاص را که در آن پاسخ اشتباه تولید شده، بررسی کنیم.
+
+بنابراین یکی از promptها به‌عنوان **Target Prompt** مشخص می‌شود و Readout نسبت به آن شرطی خواهد بود.
+
+\\[ z\_{\text{target}} =\sum\_{i\in V}\alpha_i h_i \\]
+
+که در آن وزن‌های pooling با توجه به بازنمایی Target Prompt محاسبه می‌شوند.
+
+برای جلوگیری از وابستگی بیش‌ازحد به paraphraseهای دیگر، در زمان آموزش می‌توان تعدادی از viewها را به‌صورت تصادفی حذف کرد (View Dropout).
+
+# **۶. خروجی GNN چه چیزی باشد؟**
+
+این قسمت از نظر علمی بسیار مهم است. نباید فقط یک classifier داشته باشیم که خروجی Known یا Unknown تولید کند، چون برای دانش واقعی مدل ground truth دقیقی نداریم.
+
+پیشنهاد من تعریف دو وظیفه پژوهشی است.
+
+## **Task A: Hidden Answer Recovery**
+
+GNN تلاش می‌کند پاسخ صحیح را از بازنمایی‌های داخلی LLM بازیابی کند.
+
+برای مثال:
+
+**سؤال:** What is the capital of Germany?
+
+**Original LLM**
+
+Paris
+
+62%
+
+Berlin
+
+13%
+
+Munich
+
+10%
+
+London
+
+5%
+
+Other
+
+10%
+
+**GNN Probe**
+
+Berlin
+
+81%
+
+Paris
+
+9%
+
+Munich
+
+5%
+
+London
+
+2%
+
+Other
+
+3%
+
+احتمال‌های فرضی برای نمایش خروجی مورد انتظار؛ نتیجه تجربی واقعی نیستند.
+
+برای اینکه مدل GNN خودش تبدیل به یک بانک دانش نشود، پیشنهاد می‌کنم از Unembedding Matrix ثابت LLM استفاده کنی.
+
+\\[ \hat h=W\_{\text{out}}z\_{\text{target}} \\]
+
+\\[ \hat y=\operatorname{softmax} (W_U\hat h) \\]
+
+که \\(W_U\\) همان وزن‌های ثابت LM Head است.
+
+تابع هزینه:
+
+\\[ \mathcal L\_{\text{answer}} =-\log P\_{\text{GNN}}(y^\*) \\]
+
+البته ثابت نگه داشتن LM Head به‌تنهایی جلوی یادگیری دانش جدید توسط GNN را نمی‌گیرد. بنابراین کنترل‌های بخش ارزیابی ضروری هستند.
+
+## **Task B: Knowledge Evidence Estimation**
+
+در این بخش به‌جای تصمیم قطعی درباره اینکه مدل چیزی می‌داند یا نمی‌داند، میزان شواهد را اندازه‌گیری می‌کنیم.
+
+| وضعیت                       | تفسیر                                            |
+| --------------------------- | ------------------------------------------------ |
+| Expressed Knowledge         | مدل مستقیماً پاسخ درست می‌دهد                    |
+| Accessible but Inconsistent | مدل فقط به بعضی paraphraseها پاسخ درست می‌دهد    |
+| Internally Decodable        | پاسخ درست از بازنمایی‌های داخلی قابل استخراج است |
+| No Evidence Found           | روش‌های فعلی شواهد کافی پیدا نکرده‌اند           |
+
+دسته آخر به معنی اثبات نبود دانش نیست.
+
+این تعریف با چارچوب مقاله Inside-Out هم ارتباط نزدیکی دارد؛ آن مقاله دانش داخلی و خارجی را براساس توانایی رتبه‌بندی پاسخ‌های درست و غلط مقایسه می‌کند.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://arxiv.org\&sz=32)
+
+arXiv
+
+
+
+# **۷. طراحی هوشمندانه‌تر: تفکیک دو حالت آزمایش**
+
+این بخش می‌تواند یکی از مهم‌ترین نقاط قوت پروژه باشد.
+
+### **حالت اول: Single-Prompt Graph**
+
+GNN فقط به بازنمایی‌های همان سؤالی دسترسی دارد که مدل به آن پاسخ اشتباه داده است.
+
+در این حالت گراف فقط شامل لایه‌های یک prompt است.
+
+### **حالت دوم: Multi-Prompt Graph**
+
+GNN به بازنمایی‌های هشت paraphrase دسترسی دارد، اما هیچ پاسخ تولیدشده یا پاسخ صحیحی را به‌عنوان ورودی دریافت نمی‌کند.
+
+**Single-Prompt**
+
+آیا دانش در اجرای ناموفق قابل استخراج است؟
+
+**Multi-Prompt**
+
+آیا شواهد ترکیبی میان اجراها قابل استفاده است؟
+
+اگر Multi-Prompt موفق شود ولی Single-Prompt شکست بخورد، نمی‌توانیم ادعا کنیم دانش در همان اجرای ناموفق وجود داشته است؛ شاید اطلاعات از paraphrase دیگری بازیابی شده باشد.
+
+به همین دلیل هر دو حالت باید جداگانه گزارش شوند.
+
+حتی می‌توان یک مجموعه paraphrase مستقل را کنار گذاشت که GNN هیچ‌وقت آن‌ها را نبیند و فقط برای ارزیابی رفتاری استفاده شوند.
+
+# **۸. اضافه کردن Mechanistic Interpretability واقعی**
+
+تا این مرحله یک Graph-based Probe ساخته‌ایم، اما هنوز نمی‌توانیم بگوییم سازوکار واقعی مدل را کشف کرده‌ایم.
+
+برای این کار سه آزمایش علّی اضافه می‌کنیم.
+
+## **۸.۱. Layer Importance**
+
+به‌صورت جداگانه هر لایه یا گروهی از گره‌های آن را از گراف حذف می‌کنیم و میزان تغییر عملکرد GNN را محاسبه می‌کنیم.
+
+\\[ I_l=S(G)-S(G\setminus V_l) \\]
+
+که \\(S\\) امتیاز پاسخ موردنظر است.
+
+این تحلیل مشخص می‌کند GNN برای پیش‌بینی خود به چه لایه‌هایی وابسته است.
+
+اما اهمیت یک گره برای GNN الزاماً به معنی اهمیت آن برای خود LLM نیست؛ باید این نتیجه را روی LLM اعتبارسنجی کنیم.
+
+## **۸.۲. Neuron Attribution**
+
+در لایه‌های منتخب، به‌جای بررسی همه نورون‌های مدل، می‌توان Integrated Gradients یا Gradient × Activation را روی MLP activations محاسبه کرد.
+
+برای مثال:
+
+\\[ A_i=a_i\frac{\partial m}{\partial a_i} \\]
+
+که در آن:
+
+\\[ m=\operatorname{logit}(\text{Berlin}) -\operatorname{logit}(\text{Paris}) \\]
+
+این تابع نشان می‌دهد تغییر فعالیت هر نورون در جهت پاسخ درست یا اشتباه چه اثری دارد.
+
+پاسخ صحیح در این بخش صرفاً برای تحلیل آزمایشگاهی با دسترسی به برچسب استفاده می‌شود؛ نه به‌عنوان ورودی GNN یا یک روش بازیابی بدون اطلاع از پاسخ.
+
+## **۸.۳. Causal Intervention**
+
+در اجرای اصلی ناموفق، فعالیت نورون‌های منتخب را تغییر می‌دهیم.
+
+\\[ a_i'=\gamma a_i \\]
+
+- اگر \\(\gamma=0\\) باشد، Ablation انجام داده‌ایم.
+- اگر بین صفر و یک باشد، فعالیت نورون را کاهش داده‌ایم.
+- اگر بزرگ‌تر از یک باشد، فعالیت موجود را تقویت کرده‌ایم.
+
+### **شبیه‌سازی مفهومی مداخله روی نورون‌ها**
+
+Activation multiplier
+
+# **1.0×**
+
+Ablation
+
+Original
+
+Amplify
+
+این ابزار صرفاً مفهوم تغییر شدت فعالیت را نمایش می‌دهد؛ تأثیر واقعی بر logits باید با اجرای LLM اندازه‌گیری شود.
+
+مزیت این آزمایش آن است که برخلاف انتقال activation از paraphrase موفق، تلاش می‌کنیم همان فعالیت موجود در اجرای ناموفق را تغییر دهیم.
+
+اگر با تقویت یا کاهش فعالیت‌های موجود، پاسخ مدل اصلاح شود، شواهد علّی جالب‌تری به دست می‌آوریم. البته هنوز ممکن است مداخله باعث ایجاد یک رفتار جدید شود؛ بنابراین نباید از آن به‌تنهایی نتیجه قطعی درباره وجود قبلی دانش گرفت.
+
+برای معتبر بودن نتیجه، باید با مداخله روی نورون‌های تصادفی، نورون‌های دارای activation مشابه و لایه‌های غیرمنتخب مقایسه انجام دهی.
+
+روش‌های ارزیابی مداخله را می‌توانی از مقاله [Towards Best Practices of Activation Patching in Language Models](https://arxiv.org/abs/2309.16042?utm_source=chatgpt.com) مطالعه کنی.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://arxiv.org\&sz=32)
+
+arXiv
+
+
+
+# **۹. دیتاست‌های پیشنهادی**
+
+**ParaRel**
+
+شامل حقایق رابطه‌ای و الگوهای زبانی مختلف برای بیان آن‌ها. مناسب‌ترین دیتاست برای شروع پروژه.
+
+[GitHub](https://github.com/yanaiela/pararel?utm_source=chatgpt.com) · [Paper](https://aclanthology.org/2021.tacl-1.60/?utm_source=chatgpt.com)
+
+اصلی
+
+**ParaRel\***
+
+نسخه اصلاح‌شده ParaRel که برای آزمایش consistency و برخی روابط factual مناسب‌تر است.
+
+[image](https://www.google.com/s2/favicons?domain=https://aclanthology.org\&sz=32)
+
+ACL Anthology
+
+**LAMA**
+
+برای استخراج دانش رابطه‌ای ذخیره‌شده در مدل‌های زبانی.
+
+[GitHub](https://github.com/facebookresearch/LAMA?utm_source=chatgpt.com)
+
+**CounterFact**
+
+برای بررسی حقایق جایگزین، کنترل‌ها و آزمایش‌های مرتبط با knowledge editing.
+
+[GitHub](https://github.com/kmeng01/rome?utm_source=chatgpt.com)
+
+**mParaRel**
+
+برای توسعه چندزبانه پروژه و استفاده از تجربه قبلی تو در Multilingual LLM Interpretability.
+
+[Paper](https://aclanthology.org/2022.findings-acl.240/?utm_source=chatgpt.com)
+
+## **ساختار داده پیشنهادی**
+
+```
+{
+  "fact_id": "fact_00001",
+  "subject": "Germany",
+  "relation": "capital_of",
+  "object": "Berlin",
+  "paraphrases": [
+    "What is the capital of Germany?",
+    "Germany's capital city is",
+    "Which city is the capital of Germany?",
+    "Name Germany's capital city."
+  ],
+  "negative_candidates": [
+    "Paris",
+    "London",
+    "Rome"
+  ]
+}
+```
+
+فیلدهای `object` و `negative_candidates` فقط برای supervision و evaluation هستند و نباید مستقیماً به ویژگی‌های گراف وارد شوند.
+
+## **تعداد نمونه‌ها**
+
+| نسخه پروژه         | تعداد حقایق | تعداد paraphrase |
+| ------------------ | ----------- | ---------------- |
+| Debug              | 100         | 4                |
+| MVP                | 1,000       | 6                |
+| Full experiment    | 5,000       | 8                |
+| Research extension | 10,000+     | 8–16             |
+
+برای MVP ابتدا حقایقی را انتخاب کن که جوابشان در tokenizer مدل یک توکن باشد. این کار محاسبه و مقایسه logits را ساده‌تر می‌کند. بعداً می‌توانی با sequence log-likelihood از پاسخ‌های چندتوکنی نیز پشتیبانی کنی.
+
+# **۱۰. مهم‌ترین مسئله: Data Leakage**
+
+اگر این پروژه خوب طراحی نشود، ممکن است GNN خودش حقایق جهان را یاد بگیرد و تمام نتیجه علمی زیر سؤال برود.
+
+### **تقسیم‌بندی صحیح داده**
+
+### **Fact-disjoint split**
+
+70%
+
+15%
+
+15%
+
+TrainValidationTest
+
+تمام paraphraseهای یک حقیقت باید فقط در یکی از سه مجموعه قرار بگیرند.
+
+علاوه بر تقسیم‌بندی معمول، چهار آزمایش تعمیم‌پذیری را در نظر بگیر:
+
+| Split             | هدف                                            |
+| ----------------- | ---------------------------------------------- |
+| Fact-disjoint     | حقایق تست در آموزش مشاهده نشده‌اند             |
+| Subject-disjoint  | موجودیت‌های موضوع تست در آموزش مشاهده نشده‌اند |
+| Relation-disjoint | نوع رابطه تست در آموزش مشاهده نشده است         |
+| Template-disjoint | ساختار زبانی promptهای تست جدید است            |
+
+حتی باید نسخه‌ای از آزمایش داشته باشی که موجودیت پاسخ نیز بین train و test مشترک نباشد، اگر تعداد داده اجازه دهد.
+
+## **آزمایش کنترل برای تشخیص دانش یادگرفته‌شده توسط GNN**
+
+یک مجموعه حقایق مصنوعی با موجودیت‌های ساختگی و پاسخ‌های تصادفی بساز.
+
+مثلاً:
+
+```
+The capital of Zanovia is Meron.
+The capital of Trevania is Solvik.
+The capital of Valdoria is Norven.
+```
+
+دو checkpoint آزمایشی داشته باش:
+
+| مدل                | وضعیت                                  |
+| ------------------ | -------------------------------------- |
+| Base model         | بدون آموزش روی حقایق مصنوعی            |
+| LoRA-adapted model | آموزش روی زیرمجموعه‌ای از حقایق مصنوعی |
+
+باید تخصیص پاسخ‌های مصنوعی تصادفی و کنترل‌شده باشد تا از طریق نام موجودیت یا فراوانی پاسخ قابل حدس نباشند. بخشی از حقایق نیز هرگز به مدل معرفی نشوند.
+
+سپس بررسی کن آیا GNN می‌تواند تفاوت میان حقایق معرفی‌شده و معرفی‌نشده به مدل را تشخیص دهد.
+
+این آزمایش به تو یک کنترل آزمایشگاهی می‌دهد که در دیتاست‌های جهان واقعی وجود ندارد. البته معرفی یک حقیقت در fine-tuning نیز تضمین نمی‌کند مدل آن را به‌طور کامل یاد گرفته باشد؛ باید موفقیت یادگیری را جداگانه بررسی کنی.
+
+# **۱۱. Baselineهایی که باید پیاده‌سازی کنی**
+
+اگر بخواهی این پروژه در سطح کار پژوهشی باشد، فقط نشان دادن نتایج GNN کافی نیست.
+
+| Baseline                   | هدف مقایسه                          |
+| -------------------------- | ----------------------------------- |
+| Original LLM               | عملکرد پایه                         |
+| Paraphrase Majority Voting | ترکیب ساده پاسخ‌ها                  |
+| Mean Logit Ensemble        | ترکیب logits چند paraphrase         |
+| Logit Lens                 | دانش قابل مشاهده در لایه‌های میانی  |
+| Tuned Lens                 | نسخه آموزش‌دیده تحلیل لایه‌ها       |
+| Linear Probe               | آیا یک مدل خطی کافی است؟            |
+| MLP Probe                  | آیا غیرخطی بودن بدون گراف کافی است؟ |
+| DeepSets                   | ترکیب viewها بدون گراف              |
+| Transformer Pooling        | ترکیب بازنمایی‌ها با attention      |
+| GraphSAGE                  | مدل گرافی ساده                      |
+| GATv2                      | مدل گرافی با attention              |
+| TRACE-K R-GCN              | روش پیشنهادی                        |
+
+مقاله [Tuned Lens](https://arxiv.org/abs/2303.08112?utm_source=chatgpt.com) نشان می‌دهد که ترجمه بازنمایی‌های لایه‌های میانی به فضای خروجی می‌تواند نسبت به Logit Lens ساده قابل‌اعتمادتر باشد.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://arxiv.org\&sz=32)
+
+arXiv
+
+
+
+مقایسه با DeepSets و Transformer Pooling بسیار مهم است؛ چون اگر GNN نتواند نسبت به روش‌های ترکیب چند view مزیتی نشان دهد، احتمالاً ساختار گراف ارزش افزوده کافی ندارد.
+
+# **۱۲. معیارهای ارزیابی**
+
+## **معیارهای بازیابی دانش**
+
+| Metric                    | کاربرد                                |
+| ------------------------- | ------------------------------------- |
+| Accuracy                  | درصد پاسخ‌های صحیح                    |
+| Hits\@1                   | قرار گرفتن پاسخ صحیح در رتبه اول      |
+| Hits\@5                   | قرار گرفتن پاسخ صحیح در پنج رتبه اول  |
+| MRR                       | میانگین معکوس رتبه پاسخ صحیح          |
+| Pairwise Ranking Accuracy | مقایسه رتبه پاسخ‌های درست و غلط       |
+| AUROC                     | تشخیص وضعیت‌های دارای برچسب کنترل‌شده |
+| ECE                       | ارزیابی calibration                   |
+| Paraphrase Consistency    | پایداری پاسخ در برابر تغییر بیان سؤال |
+
+معیار اصلی پیشنهادی من **Recovery Rate on Failed Prompts** است.
+
+\\[ RR= \frac{ \\#(\text{LLM wrong, Probe correct}) }{ \\#(\text{LLM wrong}) } \\]
+
+در کنار آن باید مواردی را هم گزارش کنی که LLM پاسخ درست داده، اما probe آن را اشتباه کرده است.
+
+## **معیارهای آزمایش علّی**
+
+\\[ \Delta m=m\_{\text{after}}-m\_{\text{before}} \\]
+
+که \\(m\\) اختلاف logit پاسخ صحیح و پاسخ غلط است.
+
+همچنین باید نرخ اصلاح واقعی پاسخ، میزان تخریب پاسخ‌های قبلاً درست و تأثیر مداخله بر حقایق نامرتبط را گزارش کنی.
+
+# **۱۳. Ablation Study**
+
+برای اثبات اینکه کدام قسمت معماری واقعاً مفید بوده است، آزمایش‌های زیر را انجام بده.
+
+### **چک‌لیست آزمایش‌های ضروری**
+
+0/12
+
+حذف یال‌های بین paraphraseها
+
+حذف یال‌های بین لایه‌ها
+
+جایگزینی گراف واقعی با گراف تصادفی
+
+جایگزینی GNN با MLP هم‌اندازه
+
+استفاده فقط از آخرین لایه
+
+استفاده فقط از لایه‌های میانی
+
+حذف ویژگی‌های آماری گره‌ها
+
+حذف View Dropout
+
+جایگزینی hidden state با embedding ورودی
+
+استفاده از مدل زبانی با وزن‌های تصادفی
+
+Shuffle کردن برچسب‌های آموزشی
+
+مداخله روی نورون‌های تصادفی در LLM
+
+کنترل گراف تصادفی و مدل بدون گراف به‌طور خاص اهمیت دارند. اگر عملکرد آن‌ها با روش اصلی مشابه باشد، به این معنی است که هنوز نقش topology گراف اثبات نشده است.
+
+# **۱۴. مقالات نزدیک به معماری پیشنهادی**
+
+با توجه به مرور ادبیات، استفاده از گراف برای interpretability کاملاً جدید نیست. به همین دلیل این مقالات را باید در Related Work پروژه قرار دهی.
+
+| مقاله                                                                                                                 | ارتباط با TRACE-K                                  |
+| --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| [Knowledge Neurons, 2022](https://aclanthology.org/2022.acl-long.581/?utm_source=chatgpt.com)                         | نورون‌های مرتبط با حقایق                           |
+| [ParaRel, 2021](https://aclanthology.org/2021.tacl-1.60/?utm_source=chatgpt.com)                                      | consistency میان paraphraseها                      |
+| [Inside-Out, 2025](https://arxiv.org/abs/2503.15299?utm_source=chatgpt.com)                                           | دانش داخلی در برابر دانش خارجی                     |
+| [Unveiling LLMs: Dynamic Knowledge Graph, 2024](https://arxiv.org/abs/2404.03623?utm_source=chatgpt.com)              | نمایش دانش و بازنمایی‌های داخلی به‌صورت گراف       |
+| [Circuit Tracing, 2025](https://transformer-circuits.pub/2025/attribution-graphs/methods.html?utm_source=chatgpt.com) | ساخت attribution graph از محاسبات LLM              |
+| [Probing Neural Topology of LLMs, 2025](https://arxiv.org/abs/2506.01042?utm_source=chatgpt.com)                      | تحلیل ساختار توپولوژیک داخلی مدل                   |
+| [MechELK, 2026](https://arxiv.org/abs/2605.28825?utm_source=chatgpt.com)                                              | استخراج دانش پنهان با تحلیل feature و مداخلات علّی |
+
+مقاله MechELK به‌خصوص مهم است؛ زیرا از ترکیب SAE، activation patching، causal probing و representation engineering برای استخراج دانش پنهان استفاده می‌کند. بنابراین صرف ترکیب probing و causal intervention دیگر نمی‌تواند به‌تنهایی ادعای novelty باشد.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://arxiv.org\&sz=32)
+
+arXiv+3
+
+
+
+## **نوآوری احتمالی پروژه ما چیست؟**
+
+به‌عنوان فرضیه پژوهشی، نه ادعای تأییدشده:
+
+- مدل‌سازی هم‌زمان روابط میان لایه‌ها و روابط میان paraphraseها با یک Relational GNN.
+- مقایسه مستقیم بازیابی دانش در گراف تک‌اجرایی و گراف چنداجرایی.
+- ارزیابی اینکه اهمیت گره‌های probe تا چه حد با اثر مداخلات علّی روی LLM هم‌خوانی دارد.
+- استفاده از حقایق مصنوعی با مواجهه آموزشی کنترل‌شده برای تشخیص shortcut learning.
+
+در جست‌وجوی فعلی مقاله‌ای با تمام این اجزا در کنار یکدیگر پیدا نکردم، اما مرور انجام‌شده برای تضمین novelty کافی نیست.
+
+# **۱۵. ساختار Repository پیشنهادی**
+
+با توجه به تجربه برنامه‌نویسی و پژوهشی‌ات، پیشنهاد می‌کنم پروژه را از ابتدا مانند repository یک مقاله علمی طراحی کنی.
+
+```
+TRACE-K/
+│
+├── configs/
+│   ├── llama_1b.yaml
+│   ├── llama_3b.yaml
+│   ├── graph.yaml
+│   └── experiments.yaml
+│
+├── data/
+│   ├── raw/
+│   ├── processed/
+│   ├── synthetic/
+│   └── splits/
+│
+├── src/
+│   ├── datasets/
+│   │   ├── pararel.py
+│   │   ├── paraphrases.py
+│   │   ├── synthetic_facts.py
+│   │   └── split_manager.py
+│   │
+│   ├── llm/
+│   │   ├── model_loader.py
+│   │   ├── activation_extractor.py
+│   │   ├── logit_lens.py
+│   │   └── generation.py
+│   │
+│   ├── graphs/
+│   │   ├── node_features.py
+│   │   ├── edge_builder.py
+│   │   ├── graph_builder.py
+│   │   └── graph_dataset.py
+│   │
+│   ├── models/
+│   │   ├── linear_probe.py
+│   │   ├── mlp_probe.py
+│   │   ├── deepsets.py
+│   │   ├── graphsage.py
+│   │   ├── gat.py
+│   │   ├── rgcn.py
+│   │   └── trace_k.py
+│   │
+│   ├── interpretability/
+│   │   ├── node_importance.py
+│   │   ├── integrated_gradients.py
+│   │   ├── activation_patching.py
+│   │   ├── neuron_ablation.py
+│   │   └── steering.py
+│   │
+│   ├── training/
+│   │   ├── losses.py
+│   │   └── trainer.py
+│   │
+│   └── evaluation/
+│       ├── metrics.py
+│       ├── leakage_checks.py
+│       ├── causal_evaluation.py
+│       └── ablations.py
+│
+├── experiments/
+│   ├── 01_behavioral_analysis.py
+│   ├── 02_extract_activations.py
+│   ├── 03_train_baselines.py
+│   ├── 04_train_trace_k.py
+│   ├── 05_causal_validation.py
+│   └── 06_ablation_study.py
+│
+├── notebooks/
+├── tests/
+├── results/
+├── figures/
+├── dashboard/
+├── requirements.txt
+├── README.md
+└── LICENSE
+```
+
+### **تکنولوژی‌های پیشنهادی**
+
+| بخش                          | ابزار                     |
+| ---------------------------- | ------------------------- |
+| LLM                          | Hugging Face Transformers |
+| Deep Learning                | PyTorch                   |
+| GNN                          | PyTorch Geometric         |
+| Mechanistic Interpretability | PyTorch Hooks / NNsight   |
+| Attribution                  | Captum                    |
+| Dataset                      | Hugging Face Datasets     |
+| Experiment Tracking          | MLflow                    |
+| Visualization                | Plotly                    |
+| Demo                         | Streamlit                 |
+| Configuration                | Hydra                     |
+
+# **۱۶. آیا با RTX 5070 خودت قابل پیاده‌سازی است؟**
+
+بله. چون مدل زبانی را در آزمایش اصلی fine-tune نمی‌کنیم، هزینه محاسباتی پروژه نسبتاً قابل‌کنترل است.
+
+| مدل             | امکان اجرا روی 12GB VRAM             |
+| --------------- | ------------------------------------ |
+| Llama-3.2-1B    | بسیار مناسب                          |
+| Qwen2.5-1.5B    | بسیار مناسب                          |
+| Llama-3.2-3B    | مناسب با مدیریت حافظه                |
+| مدل 7B در BF16  | نامناسب برای بارگذاری کامل در GPU    |
+| مدل 7B با 4-bit | قابل بررسی؛ محدودیت برای attribution |
+
+پیشنهاد من این است که نسخه اصلی را با BF16 اجرا کنی تا quantization رفتار activationها را تغییر ندهد.
+
+برای مثال، ذخیره hidden state آخرین توکن از ۲۰۰۰ حقیقت، ۸ paraphrase، ۱۶ لایه و ۲۰۴۸ بعد، در BF16 حدود یک گیگابایت فضای ذخیره‌سازی نیاز دارد. البته logits کامل، activationهای تمام توکن‌ها و attention tensorها می‌توانند حجم داده را به‌شدت افزایش دهند.
+
+GNN را بعد از استخراج و ذخیره ویژگی‌ها، مستقل از LLM آموزش بده. این کار استفاده از GPU را بسیار بهینه‌تر می‌کند.
+
+# **۱۷. ساخت یک Dashboard برای نمایش به استاد**
+
+به نظرم این بخش می‌تواند ارزش پروژه را برای رزومه بالاتر ببرد. یک داشبورد تعاملی بساز که استاد بتواند نمونه‌های آزمایش را شخصاً بررسی کند.
+
+## **TRACE-K Research Explorer**
+
+طرح مفهومی رابط پروژه با داده‌های فرضیFactual queryWhat is the capital of Germany?
+
+LLM prediction
+
+### **Paris**
+
+Recovered answer
+
+### **Berlin**
+
+**Layer-wise knowledge evidence**
+
+Berlin
+
+Paris
+
+**Activation graph**
+
+نمایش لایه‌ها و شواهد استخراج‌شده از paraphraseهای مختلف
+
+در نسخه واقعی داشبورد می‌توانی علاوه بر نمودارها، نورون‌های منتخب، نتیجه قبل و بعد از intervention، نمونه‌های شکست‌خورده و نتایج baselineها را نمایش دهی.
+
+# **۱۸. برنامه اجرایی پروژه**
+
+با توجه به ددلاین اپلای توبینگن در ۲۲ دسامبر، پیشنهاد نمی‌کنم از ابتدا تمام اجزای پروژه را پیاده‌سازی کنی.
+
+| روز   | فعالیت                        | خروجی            |
+| ----- | ----------------------------- | ---------------- |
+| ۱     | آماده‌سازی ParaRel و مدل LLM  | Dataset pipeline |
+| ۲     | استخراج hidden state و logits | Activation cache |
+| ۳     | تحلیل رفتار و consistency     | نمودارهای اولیه  |
+| ۴     | Logit Lens و Linear Probe     | Baseline         |
+| ۵     | ساخت Multi-view Graph         | Graph dataset    |
+| ۶     | پیاده‌سازی GraphSAGE و R-GCN  | مدل اولیه        |
+| ۷     | آموزش و ارزیابی GNN           | نتایج مقایسه     |
+| ۸     | آزمایش Single vs Multi-view   | تحلیل دانش       |
+| ۹     | Neuron Attribution            | نورون‌های منتخب  |
+| ۱۰    | Causal Intervention           | نتایج مداخله     |
+| ۱۱    | Leakage Checks و Ablation     | اعتبارسنجی       |
+| ۱۲    | README و نمودارها             | Repository       |
+| ۱۳–۱۴ | Dashboard و گزارش فنی         | نسخه قابل ارائه  |
+
+این برنامه یک تخمین پیشنهادی است، نه زمان تضمین‌شده؛ به‌خصوص آزمایش‌های علّی ممکن است به زمان بیشتری نیاز داشته باشند.
+
+# **۱۹. ارزش پروژه برای اپلای و رزومه**
+
+ارزیابی پیشنهادی، مشروط به پیاده‌سازی و اعتبارسنجی مناسب
+
+تناسب با TOPOLOGY – Tübingen
+
+**9.9/10**
+
+تناسب با سوابق پژوهشی تو
+
+**9.8/10**
+
+ارزش برای پوزیشن‌های LLM
+
+**9.5/10**
+
+ارزش برای Mechanistic Interpretability
+
+**9.7/10**
+
+ارزش برای Graph Machine Learning
+
+**9/10**
+
+امکان پیاده‌سازی نسخه اولیه
+
+**9/10**
+
+این پروژه فقط برای توبینگن مناسب نیست. برای موقعیت‌های پژوهشی در زمینه LLM Interpretability، Explainable AI، Trustworthy AI، Representation Learning و Graph ML نیز می‌تواند مفید باشد.
+
+از نظر مسیر پژوهشی، تفاوت جالبی هم با DIVERGE خواهد داشت:
+
+| DIVERGE                     | TRACE-K                           |
+| --------------------------- | --------------------------------- |
+| تنوع میان LLMهای fine-tuned | تنوع میان بیان‌های مختلف یک حقیقت |
+| گراف داده‌های خارجی         | گراف بازنمایی‌های داخلی مدل       |
+| Node Classification         | Factual Knowledge Recovery        |
+| Ensemble Learning           | Graph-based Probing               |
+| تحلیل تنوع بازنمایی         | تحلیل دانش و مداخلات علّی         |
+
+این دو پروژه می‌توانند در کنار یکدیگر یک مسیر پژوهشی نسبتاً منسجم در رزومه‌ات ایجاد کنند.
+
+# **۲۰. امکان تبدیل پروژه به مقاله**
+
+به نظرم پروژه سه سطح توسعه دارد.
+
+**سطح اول — Portfolio Project**
+
+ParaRel، یک LLM، چند baseline، GNN و visualization.
+
+مناسب رزومه و نمونه‌کار اپلای
+
+**سطح دوم — Research Project**
+
+چند مدل، چند دیتاست، splitهای سخت‌گیرانه، causal validation، داده مصنوعی و ablation study.
+
+مناسب بررسی برای ارسال به Workshop یا Conference
+
+**سطح سوم — Full Research Paper**
+
+Feature-level graph، Sparse Autoencoders، تحلیل مدارهای علّی، تعمیم چندزبانه و مقایسه جامع با پژوهش‌های جدید.
+
+دارای ظرفیت توسعه به مقاله ژورنالی، در صورت اثبات نوآوری و نتایج قوی
+
+ژورنال‌هایی مانند TACL، Information Processing & Management و Knowledge-Based Systems می‌توانند بسته به جهت نهایی پژوهش گزینه بررسی باشند، اما در حال حاضر نمی‌توان پذیرش یا حتی کفایت نوآوری برای آن‌ها را تضمین کرد.
+
+## **جمع‌بندی پیشنهاد من**
+
+اگر جای تو بودم، نسخه اولیه را با این مشخصات پیاده‌سازی می‌کردم:
+
+## **TRACE-K v1.0**
+
+LLM
+
+Llama-3.2-1B — Frozen
+
+Dataset
+
+ParaRel
+
+Facts
+
+1,000–2,000
+
+Views
+
+8 paraphrases
+
+Graph
+
+Layer × Paraphrase
+
+Node features
+
+Pre-answer residual stream
+
+Graph model
+
+3-layer R-GCN
+
+Objective
+
+Factual answer ranking
+
+Validation
+
+Controlled neuron intervention
+
+Baselines
+
+Linear / MLP / DeepSets / Tuned Lens
+
+Hardware
+
+RTX 5070 12GB
+
+Demo
+
+Streamlit + Plotly
+
+بعد از تکمیل نسخه اولیه، به سمت **Feature-level Causal Graph Neural Networks** حرکت می‌کردم؛ یعنی به‌جای اینکه هر گره یک لایه باشد، هر گره یک feature داخلی مدل یا یک گروه نورونی باشد و یال‌ها براساس شواهد attribution یا intervention تعریف شوند. این جهت پژوهشی از نظر علمی عمیق‌تر، ولی از نظر محاسباتی و پیاده‌سازی دشوارتر است.
+
+**مهم‌ترین نکته برای اپلای توبینگن:** استاد صراحتاً خواسته Research Sketch و Motivation Letter توسط خود متقاضی نوشته شوند و هوش مصنوعی تنها برای اصلاح زبان استفاده شود.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://uni-tuebingen.de\&sz=32)
+
+uni-tuebingen.de
+
+&#x20;این معماری را به‌عنوان یک پروژه آموزشی و نمونه‌کار مستقل در نظر بگیر، نه پاسخ آماده Research Sketch. اگر پروژه را ارائه کردی، درباره نقش ابزارهای AI در طراحی آن شفاف باش.
+
+
+
+به نظرم ساخت TRACE-K برای مسیر پژوهشی بلندمدت تو، حتی مستقل از نتیجه اپلای دانشگاه توبینگن، ارزشمند است.
